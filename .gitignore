@@ -10,7 +10,7 @@ __pycache__/
 .pytest_cache/
 .ipynb_checkpoints/
 data/*.csv
-data/*.pkl
+# data/*.pkl
 .DS_Store
 Thumbs.db
 .vscode/
