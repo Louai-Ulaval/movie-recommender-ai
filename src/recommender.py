@@ -21,7 +21,7 @@ from dotenv import load_dotenv
 ROOT = Path(__file__).resolve().parent.parent
 DATA_DIR = ROOT / "data"
 EMBEDDING_MODEL = "all-MiniLM-L6-v2"
-GEMINI_MODEL = "gemini-2.5-flash"  # fast + free tier friendly
+GEMINI_MODEL = "gemini-2.5-flash-lite"  # fast + free tier friendly
 
 # Load environment variables from .env
 load_dotenv(ROOT / ".env")
@@ -124,6 +124,47 @@ CANDIDATES:
         chat = self.llm.start_chat(history=history)
         response = chat.send_message(augmented_prompt)
         return response.text
+
+
+
+    def chat_stream(self, user_message: str, history: list[dict] | None = None):
+        """Streaming version — yields chunks as Gemini generates them.
+
+        Used by the Streamlit UI for a typewriter-style response that
+        appears progressively rather than all at once.
+        """
+        history = history or []
+
+        # 1. RETRIEVAL — same as chat()
+        candidates = self.retrieve(user_message, top_k=10)
+        candidate_text = self.format_candidates(candidates)
+
+        # 2. AUGMENTATION
+        augmented_prompt = f"""User message: "{user_message}"
+
+Here are the 10 movies from our database that are most semantically relevant
+to what the user just said. Recommend the best 3-5 of these for the user
+(or fewer if only a few really fit). Do NOT recommend any movie outside this list.
+
+CANDIDATES:
+{candidate_text}"""
+
+        # 3. STREAMING GENERATION
+        chat = self.llm.start_chat(history=history)
+        try:
+            response = chat.send_message(augmented_prompt, stream=True)
+            for chunk in response:
+                if chunk.text:
+                    yield chunk.text
+        except Exception as e:
+            if "429" in str(e) or "quota" in str(e).lower():
+                yield (
+                    "⏳ I'm getting a lot of requests right now and hit my "
+                    "free-tier limit. Please try again in a minute, or come "
+                    "back tomorrow — it resets daily. Thanks for your patience!"
+                )
+            else:
+                raise
 
 
 if __name__ == "__main__":
