@@ -2,6 +2,8 @@
 
 > A fully private, local recommendation engine that pairs semantic search over a 4,800-film dataset with a locally-hosted LLM. No API keys, no cloud calls, no usage costs.
 
+![LBH Cima — local RAG movie recommender](assets/screenshot.png)
+
 ## Project Overview
 
 LBH Cima is an interactive movie recommendation platform that runs entirely on local infrastructure. It combines content-based semantic search with a Retrieval-Augmented Generation (RAG) pipeline driven by a local Ollama server, so users can converse naturally with the assistant to discover films — without any request ever leaving the machine.
