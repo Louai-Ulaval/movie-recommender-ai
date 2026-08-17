@@ -18,7 +18,7 @@ The core design constraint is **grounding**: the model is never allowed to recom
 * **Citations panel** — Toggle *Citation* to see exactly which films were retrieved for a query, with their similarity scores. This surfaces the retrieval step that normally stays hidden inside a RAG app.
 * **Writing styles** — Switch between Default, Concise, Detailed and Playful response registers.
 * **Streaming responses** — Tokens render as they arrive from Ollama, with a live typewriter cursor.
-* **Custom light UI** — A minimalist ChatGPT/Claude-style interface built entirely in CSS on top of Streamlit: animated gradient orb, time-aware greeting, prompt cards, and a fixed icon rail.
+* **Custom light UI** — A minimalist, modern chat interface built entirely in CSS on top of Streamlit: animated gradient orb, time-aware greeting, prompt cards, and a fixed icon rail.
 
 ## Tech Stack
 
