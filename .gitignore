@@ -15,4 +15,6 @@ data/*.csv
 Thumbs.db
 .vscode/
 .idea/
+.claude/
+.claude-flow/
 .streamlit/secrets.toml

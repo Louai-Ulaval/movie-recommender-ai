@@ -1,0 +1,18 @@
+# Pins the app to Streamlit's light theme regardless of the OS / browser
+# colour scheme. This is the root-cause fix for the dark bottom strip:
+# without it, a machine in dark mode makes Streamlit bake dark colours into
+# its own emotion CSS, and the bottom wrapper renders black behind the
+# chat input. The CSS in app.py is the belt-and-braces layer on top.
+[theme]
+base = "light"
+primaryColor = "#a855f7"
+backgroundColor = "#ffffff"
+secondaryBackgroundColor = "#f7f7f8"
+textColor = "#1a1a1a"
+font = "sans serif"
+
+[client]
+toolbarMode = "minimal"
+
+[browser]
+gatherUsageStats = false

@@ -1,30 +1,25 @@
 """
-The RAG brain of the movie recommender.
+The RAG brain of the movie recommender (Powered by Local Ollama).
 
 Combines:
   1. Semantic search over precomputed movie embeddings (retrieval)
-  2. Google Gemini to generate a natural-language response with
+  2. Local Ollama (llama3.2) to generate a natural-language response with
      real movie recommendations from the dataset (generation)
 
 This is what gets called from the Streamlit chat UI.
 """
 
-import os
+from pathlib import Path
 import numpy as np
 import pandas as pd
-import google.generativeai as genai
-from pathlib import Path
+import ollama
 from sentence_transformers import SentenceTransformer
-from dotenv import load_dotenv
 
 
 ROOT = Path(__file__).resolve().parent.parent
 DATA_DIR = ROOT / "data"
 EMBEDDING_MODEL = "all-MiniLM-L6-v2"
-GEMINI_MODEL = "gemini-2.5-flash-lite"  # fast + free tier friendly
-
-# Load environment variables from .env
-load_dotenv(ROOT / ".env")
+OLLAMA_MODEL = "llama3.2"  # Fast, local, and completely free
 
 
 SYSTEM_PROMPT = """You are LBH Cima, a friendly movie recommendation assistant.
@@ -57,18 +52,7 @@ class MovieRecommender:
         print("Loading sentence-transformer model...")
         self.embedder = SentenceTransformer(EMBEDDING_MODEL)
 
-        print("Configuring Gemini...")
-        api_key = os.getenv("GEMINI_API_KEY")
-        if not api_key:
-            raise RuntimeError(
-                "GEMINI_API_KEY not found. "
-                "Make sure .env exists in the project root and contains your key."
-            )
-        genai.configure(api_key=api_key)
-        self.llm = genai.GenerativeModel(
-            GEMINI_MODEL,
-            system_instruction=SYSTEM_PROMPT,
-        )
+        print(f"Connecting to local Ollama model ({OLLAMA_MODEL})...")
         print("Ready.")
 
     def retrieve(self, query: str, top_k: int = 10) -> pd.DataFrame:
@@ -76,7 +60,6 @@ class MovieRecommender:
         query_vec = self.embedder.encode(
             query, normalize_embeddings=True, convert_to_numpy=True
         )
-        # Embeddings already normalized → dot product = cosine similarity
         similarities = self.embeddings @ query_vec
         top_indices = similarities.argsort()[::-1][:top_k]
         results = self.df.iloc[top_indices].copy()
@@ -93,7 +76,7 @@ class MovieRecommender:
             )
             genres = ", ".join(row["genres"]) if row["genres"] else "Unknown"
             director = row["director"] or "Unknown"
-            overview = (row["overview"] or "")[:200]  # truncate for token budget
+            overview = (row["overview"] or "")[:200]
             lines.append(
                 f"- **{row['title']} ({year})** | Genres: {genres} | "
                 f"Director: {director} | Rating: {row['vote_average']}/10\n"
@@ -101,15 +84,20 @@ class MovieRecommender:
             )
         return "\n".join(lines)
 
-    def chat(self, user_message: str, history: list[dict] | None = None) -> str:
-        """Main entry point — RAG: retrieve relevant movies, then generate."""
-        history = history or []
+    def _build_messages(self, user_message: str, history: list[dict] | None = None) -> list[dict]:
+        """Format chat history and current prompt for Ollama."""
+        messages = [{"role": "system", "content": SYSTEM_PROMPT}]
 
-        # 1. RETRIEVAL — get top candidates from our dataset
+        if history:
+            for item in history:
+                # Adapt from previous Gemini format if needed
+                role = "assistant" if item.get("role") in ["model", "assistant"] else "user"
+                content = item.get("content") or item.get("parts", [""])[0]
+                messages.append({"role": role, "content": content})
+
         candidates = self.retrieve(user_message, top_k=10)
         candidate_text = self.format_candidates(candidates)
 
-        # 2. AUGMENTATION — build a prompt with the user's message + candidates
         augmented_prompt = f"""User message: "{user_message}"
 
 Here are the 10 movies from our database that are most semantically relevant
@@ -119,59 +107,32 @@ to what the user just said. Recommend the best 3-5 of these for the user
 CANDIDATES:
 {candidate_text}"""
 
-        # 3. GENERATION — Gemini composes the natural-language response
-        # We pass the prior conversation so it has chat memory
-        chat = self.llm.start_chat(history=history)
-        response = chat.send_message(augmented_prompt)
-        return response.text
+        messages.append({"role": "user", "content": augmented_prompt})
+        return messages
 
-
+    def chat(self, user_message: str, history: list[dict] | None = None) -> str:
+        """Main entry point — RAG using local Ollama."""
+        messages = self._build_messages(user_message, history)
+        response = ollama.chat(model=OLLAMA_MODEL, messages=messages)
+        return response["message"]["content"]
 
     def chat_stream(self, user_message: str, history: list[dict] | None = None):
-        """Streaming version — yields chunks as Gemini generates them.
-
-        Used by the Streamlit UI for a typewriter-style response that
-        appears progressively rather than all at once.
-        """
-        history = history or []
-
-        # 1. RETRIEVAL — same as chat()
-        candidates = self.retrieve(user_message, top_k=10)
-        candidate_text = self.format_candidates(candidates)
-
-        # 2. AUGMENTATION
-        augmented_prompt = f"""User message: "{user_message}"
-
-Here are the 10 movies from our database that are most semantically relevant
-to what the user just said. Recommend the best 3-5 of these for the user
-(or fewer if only a few really fit). Do NOT recommend any movie outside this list.
-
-CANDIDATES:
-{candidate_text}"""
-
-        # 3. STREAMING GENERATION
-        chat = self.llm.start_chat(history=history)
+        """Streaming version using local Ollama for the typewriter effect."""
+        messages = self._build_messages(user_message, history)
         try:
-            response = chat.send_message(augmented_prompt, stream=True)
-            for chunk in response:
-                if chunk.text:
-                    yield chunk.text
+            stream = ollama.chat(model=OLLAMA_MODEL, messages=messages, stream=True)
+            for chunk in stream:
+                content = chunk.get("message", {}).get("content", "")
+                if content:
+                    yield content
         except Exception as e:
-            if "429" in str(e) or "quota" in str(e).lower():
-                yield (
-                    "⏳ I'm getting a lot of requests right now and hit my "
-                    "free-tier limit. Please try again in a minute, or come "
-                    "back tomorrow — it resets daily. Thanks for your patience!"
-                )
-            else:
-                raise
+            yield f"⚠️ Ollama error: {str(e)}. Make sure the Ollama application is running on your Mac!"
 
 
 if __name__ == "__main__":
-    # Quick CLI test — run `python src/recommender.py` to verify it works
     rec = MovieRecommender()
     print("\n" + "=" * 60)
-    print("LBH Cima CLI test — type 'quit' to exit")
+    print("LBH Cima CLI test (Ollama) — type 'quit' to exit")
     print("=" * 60)
     history = []
     while True:
@@ -182,6 +143,5 @@ if __name__ == "__main__":
             continue
         reply = rec.chat(msg, history)
         print(f"\nLBH Cima: {reply}")
-        # Track history so context carries forward
-        history.append({"role": "user", "parts": [msg]})
-        history.append({"role": "model", "parts": [reply]})
+        history.append({"role": "user", "content": msg})
+        history.append({"role": "assistant", "content": reply})
